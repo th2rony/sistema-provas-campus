@@ -6,7 +6,7 @@ import pandas as pd
 # Configuração da página
 st.set_page_config(page_title="Portal de Provas", page_icon="🎓")
 
-# --- CONEXÃO NATIVA (PADRÃO TOML) ---
+# --- CONEXÃO COM DEBUG ---
 @st.cache_resource
 def conectar_banco_dados():
     scopes = [
@@ -15,30 +15,32 @@ def conectar_banco_dados():
     ]
     
     try:
-        # 1. Tenta ler os segredos. Se der erro aqui, mostra quais chaves existem para debug.
+        # 1. Tenta ler os segredos
         if "gcp_service_account" not in st.secrets:
-            st.error("ERRO: A chave 'gcp_service_account' não foi encontrada.")
-            st.write("Chaves encontradas no sistema:", list(st.secrets.keys()))
+            st.error("ERRO: Chave 'gcp_service_account' não encontrada no Secrets.")
             st.stop()
 
-        # 2. Pega o dicionário direto do arquivo TOML
         info_conta = dict(st.secrets["gcp_service_account"])
         
-        # 3. Garante que a chave privada tenha as quebras de linha corretas
-        # O TOML às vezes remove os \n, então recolocamos por segurança
+        # Correção da quebra de linha
         if "private_key" in info_conta:
             info_conta["private_key"] = info_conta["private_key"].replace("\\n", "\n")
         
-        # 4. Conecta
+        # 2. Autenticação
         creds = Credentials.from_service_account_info(info_conta, scopes=scopes)
         client = gspread.authorize(creds)
-        return client.open("Sistema de Provas Acadêmico")
+        
+        # 3. Abrir Planilha pelo ID (MUITO MAIS SEGURO)
+        # Substitua o ID abaixo pelo ID da sua planilha
+        ID_PLANILHA = "10vX_TVmPEcvr-_dpQEyrcVjObGjj4zIWW_7dX7_hBAQ" 
+        
+        return client.open_by_key(ID_PLANILHA)
         
     except Exception as e:
-        st.error(f"Erro Técnico: {e}")
+        st.error(f"Erro na Conexão: {e}")
         st.stop()
 
-# Conecta ao banco de dados
+# Tenta conectar e mostra mensagem se der certo
 planilha = conectar_banco_dados()
 
 # --- TELA PRINCIPAL ---
