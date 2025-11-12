@@ -2,11 +2,12 @@ import streamlit as st
 import gspread
 from google.oauth2.service_account import Credentials
 import pandas as pd
+import json
 
 # Configuração da página
 st.set_page_config(page_title="Portal de Provas", page_icon="🎓")
 
-# --- CONEXÃO MODERNA (COM CORREÇÃO DE CHAVE) ---
+# --- CONEXÃO BLINDADA (MÉTODO JSON PURO) ---
 @st.cache_resource
 def conectar_banco_dados():
     # Definimos o escopo de permissão
@@ -16,13 +17,12 @@ def conectar_banco_dados():
     ]
     
     try:
-        # 1. Lê as informações do cofre (Secrets)
-        # Transformamos em um dicionário editável
-        info_conta = dict(st.secrets["gcp_service_account"])
+        # 1. Lê o JSON inteiro como um texto único dos Secrets
+        json_bruto = st.secrets["google_credentials_json"]
         
-        # 2. O FIX MÁGICO: Corrigimos a quebra de linha na chave privada
-        # Se houver "\n" como texto, vira um "Enter" real
-        info_conta["private_key"] = info_conta["private_key"].replace("\\n", "\n")
+        # 2. O Python converte o texto em um dicionário (objeto) real
+        # Isso resolve 100% dos problemas de quebra de linha (\n)
+        info_conta = json.loads(json_bruto)
         
         # 3. Cria as credenciais
         creds = Credentials.from_service_account_info(info_conta, scopes=scopes)
@@ -32,10 +32,10 @@ def conectar_banco_dados():
         return client.open("Sistema de Provas Acadêmico")
         
     except Exception as e:
-        st.error(f"Erro na conexão: {e}")
+        st.error(f"Erro Crítico na Conexão: {e}")
         st.stop()
 
-# Conecta ao banco de dados assim que abre
+# Conecta ao banco de dados
 planilha = conectar_banco_dados()
 
 # --- TELA PRINCIPAL ---
@@ -63,11 +63,10 @@ if perfil == "Professor":
             else:
                 try:
                     aba = planilha.worksheet("Provas")
-                    # Salva removendo espaços extras
                     aba.append_row([curso, turma, turno, nome_prova, gabarito.replace(" ", "")])
                     st.success("Prova salva com sucesso!")
                 except:
-                    st.error("Erro: Verifique se a aba 'Provas' existe na planilha.")
+                    st.error("Erro: A aba 'Provas' não existe na planilha.")
 
 # ==================================================
 # ÁREA DO ALUNO
@@ -87,32 +86,26 @@ else:
             df = pd.DataFrame(dados)
             
             if not df.empty:
-                df = df.astype(str) # Garante que tudo é texto para não dar erro
+                df = df.astype(str)
                 filtro = (
                     (df['curso'].str.lower() == f_curso.lower()) &
                     (df['turma'].str.lower() == f_turma.lower()) &
                     (df['turno'].str.lower() == f_turno.lower())
                 )
-                # Salva na memória do navegador
                 st.session_state['provas'] = df[filtro].to_dict('records')
             else:
-                st.warning("Nenhuma prova encontrada no sistema.")
+                st.warning("Nenhuma prova encontrada.")
         except:
-            st.error("Erro ao ler a planilha. Verifique se a aba 'Provas' existe.")
+            st.error("Erro ao ler planilha. Verifique se tem dados na aba 'Provas'.")
 
-    # Se tiver provas na memória, mostra o formulário
     if 'provas' in st.session_state and st.session_state['provas']:
         lista_provas = st.session_state['provas']
         
         if not lista_provas:
-            st.warning("Nenhuma prova encontrada para esses dados.")
+            st.warning("Nenhuma prova encontrada.")
         else:
             st.write("---")
-            # Cria lista de nomes para o menu
-            nomes = [p['nome_prova'] for p in lista_provas]
-            escolha = st.selectbox("Selecione a prova:", nomes)
-            
-            # Acha a prova escolhida na lista
+            escolha = st.selectbox("Selecione a prova:", [p['nome_prova'] for p in lista_provas])
             prova = next(p for p in lista_provas if p['nome_prova'] == escolha)
             
             st.info(f"Realizando: *{prova['nome_prova']}*")
@@ -123,32 +116,21 @@ else:
                 
                 if st.form_submit_button("✉️ Entregar Prova"):
                     if not nome or not resp:
-                        st.error("Preencha seu nome e as respostas.")
+                        st.error("Preencha seu nome e respostas.")
                     else:
-                        # Lógica de Correção
                         gab = prova['gabarito_oficial'].split(',')
                         alu = resp.replace(" ", "").split(',')
-                        
-                        # Conta acertos comparando índice por índice
-                        acertos = 0
+                        acertos = sum([1 for i in range(min(len(gab), len(alu))) if gab[i] == alu[i]])
                         total = len(gab)
-                        for i in range(min(total, len(alu))):
-                            if gab[i] == alu[i]:
-                                acertos += 1
-                        
                         nota = (acertos/total)*100
                         
                         if nota >= 70:
                             st.balloons()
-                            st.success(f"Aprovado! Nota: {nota:.1f}% ({acertos}/{total})")
+                            st.success(f"Nota: {nota:.1f}% ({acertos}/{total})")
                         else:
                             st.error(f"Nota: {nota:.1f}% ({acertos}/{total})")
                         
-                        # Salva na aba Submissoes
-                        try:
-                            planilha.worksheet("Submissoes").append_row([
-                                nome, prova['curso'], prova['turma'], prova['turno'], 
-                                prova['nome_prova'], resp, acertos, total
-                            ])
-                        except:
-                            st.error("Erro ao salvar na aba 'Submissoes'.")
+                        planilha.worksheet("Submissoes").append_row([
+                            nome, prova['curso'], prova['turma'], prova['turno'], 
+                            prova['nome_prova'], resp, acertos, total
+                        ])
