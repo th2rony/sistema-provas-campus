@@ -1,63 +1,70 @@
 import streamlit as st
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+from google.oauth2.service_account import Credentials
 import pandas as pd
 import json
 
-# Configuração da aba do navegador
+# Configuração da página
 st.set_page_config(page_title="Portal de Provas", page_icon="🎓")
 
-# --- CONEXÃO COM A PLANILHA (MODO SEGURO) ---
+# --- CONEXÃO MODERNA (CORRIGE O ERRO 200) ---
 @st.cache_resource
 def conectar_banco_dados():
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    # Definimos o escopo de permissão
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ]
+    
     try:
-        # O servidor vai ler a senha do "Cofre" (Secrets), não de um arquivo solto
+        # Lê as informações do cofre (Secrets)
         info_conta = dict(st.secrets["gcp_service_account"])
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(info_conta, scope)
+        
+        # Cria as credenciais usando a biblioteca nova (google-auth)
+        creds = Credentials.from_service_account_info(info_conta, scopes=scopes)
+        
+        # Autoriza o gspread
         client = gspread.authorize(creds)
-        return client.open("Sistema de Provas Acadêmico") # Nome exato da planilha
+        
+        # Abre a planilha
+        return client.open("Sistema de Provas Acadêmico")
+        
     except Exception as e:
-        st.error(f"Erro de conexão: {e}")
+        st.error(f"Erro na conexão: {e}")
         st.stop()
 
-# Conecta assim que o site abre
+# Conecta ao banco de dados
 planilha = conectar_banco_dados()
 
 # --- TELA PRINCIPAL ---
 st.title("🎓 Portal Acadêmico")
-st.markdown("Bem-vindo ao sistema de provas.")
-perfil = st.radio("Quem é você?", ["Sou Professor", "Sou Aluno"], horizontal=True)
+perfil = st.radio("Acesso:", ["Professor", "Aluno"], horizontal=True)
 st.divider()
 
 # ==================================================
 # ÁREA DO PROFESSOR
 # ==================================================
-if perfil == "Sou Professor":
-    st.subheader("Cadastro de Prova")
+if perfil == "Professor":
+    st.subheader("Cadastrar Prova")
     
-    with st.form("form_nova_prova"):
-        col1, col2 = st.columns(2)
-        curso = col1.text_input("Curso")
-        turma = col2.text_input("Turma")
+    with st.form("form_prof"):
+        c1, c2 = st.columns(2)
+        curso = c1.text_input("Curso")
+        turma = c2.text_input("Turma")
         turno = st.selectbox("Turno", ["Manhã", "Tarde", "Noite"])
-        nome_prova = st.text_input("Nome da Prova (Ex: Matemática 1)")
-        gabarito = st.text_input("Gabarito Oficial (Ex: A,B,C,D)").upper()
+        nome_prova = st.text_input("Nome da Prova")
+        gabarito = st.text_input("Gabarito (Ex: A,B,C)").upper()
         
-        enviar = st.form_submit_button("Salvar Prova")
-        
-        if enviar:
+        if st.form_submit_button("Salvar"):
             if not (curso and turma and nome_prova and gabarito):
-                st.warning("Preencha todos os campos!")
+                st.warning("Preencha todos os campos.")
             else:
                 try:
                     aba = planilha.worksheet("Provas")
-                    # Remove espaços do gabarito para evitar erros
-                    gabarito_limpo = gabarito.replace(" ", "")
-                    aba.append_row([curso, turma, turno, nome_prova, gabarito_limpo])
-                    st.success(f"✅ Prova '{nome_prova}' salva com sucesso!")
+                    aba.append_row([curso, turma, turno, nome_prova, gabarito.replace(" ", "")])
+                    st.success("Prova salva!")
                 except:
-                    st.error("Erro ao salvar. Verifique se a aba 'Provas' existe na planilha.")
+                    st.error("A aba 'Provas' não existe na planilha.")
 
 # ==================================================
 # ÁREA DO ALUNO
@@ -65,95 +72,63 @@ if perfil == "Sou Professor":
 else:
     st.subheader("Realizar Prova")
     
-    # Filtros de busca
     c1, c2, c3 = st.columns(3)
-    f_curso = c1.text_input("Seu Curso")
-    f_turma = c2.text_input("Sua Turma")
-    f_turno = c3.selectbox("Seu Turno", ["Manhã", "Tarde", "Noite"])
+    f_curso = c1.text_input("Curso")
+    f_turma = c2.text_input("Turma")
+    f_turno = c3.selectbox("Turno", ["Manhã", "Tarde", "Noite"])
     
-    # Botão de busca
-    if st.button("🔍 Buscar Provas Disponíveis"):
+    if st.button("Buscar Provas"):
         try:
             aba = planilha.worksheet("Provas")
             dados = aba.get_all_records()
             df = pd.DataFrame(dados)
             
             if not df.empty:
-                # Converte tudo para texto para filtrar sem erros
                 df = df.astype(str)
-                # Filtra ignorando maiúsculas/minúsculas
                 filtro = (
                     (df['curso'].str.lower() == f_curso.lower()) &
                     (df['turma'].str.lower() == f_turma.lower()) &
                     (df['turno'].str.lower() == f_turno.lower())
                 )
-                # Salva o resultado na memória do navegador
-                st.session_state['provas_encontradas'] = df[filtro].to_dict('records')
+                st.session_state['provas'] = df[filtro].to_dict('records')
             else:
-                st.warning("Nenhuma prova cadastrada no sistema ainda.")
+                st.warning("Nenhuma prova encontrada.")
         except:
-            st.error("Erro ao ler planilha. Verifique a aba 'Provas'.")
+            st.error("Erro ao ler a planilha.")
 
-    # Se encontrou provas, mostra o formulário de resposta
-    if 'provas_encontradas' in st.session_state and st.session_state['provas_encontradas']:
-        provas = st.session_state['provas_encontradas']
+    if 'provas' in st.session_state and st.session_state['provas']:
+        lista_provas = st.session_state['provas']
         
-        if len(provas) == 0:
+        if not lista_provas:
             st.warning("Nenhuma prova encontrada para esses dados.")
         else:
             st.write("---")
-            # Menu para selecionar a prova
-            nomes_provas = [p['nome_prova'] for p in provas]
-            escolha = st.selectbox("Selecione a prova:", nomes_provas)
+            escolha = st.selectbox("Escolha a prova:", [p['nome_prova'] for p in lista_provas])
+            prova = next(p for p in lista_provas if p['nome_prova'] == escolha)
             
-            # Pega os dados da prova escolhida
-            prova_atual = next(p for p in provas if p['nome_prova'] == escolha)
+            st.info(f"Prova: *{prova['nome_prova']}*")
             
-            st.info(f"Você está realizando: *{prova_atual['nome_prova']}*")
-            
-            with st.form("form_resposta"):
-                nome_aluno = st.text_input("Seu Nome Completo")
-                respostas = st.text_input("Suas Respostas (Ex: A,B,C,D)").upper()
+            with st.form("resposta"):
+                nome = st.text_input("Seu Nome")
+                resp = st.text_input("Respostas (Ex: A,B,C)").upper()
                 
-                entregar = st.form_submit_button("✉️ Entregar Prova")
-                
-                if entregar:
-                    if not nome_aluno or not respostas:
-                        st.error("Preencha seu nome e respostas.")
+                if st.form_submit_button("Entregar"):
+                    if not nome or not resp:
+                        st.error("Preencha tudo.")
                     else:
-                        # --- CORREÇÃO AUTOMÁTICA ---
-                        gabarito_oficial = prova_atual['gabarito_oficial'].split(',')
-                        gabarito_aluno = respostas.replace(" ", "").split(',')
+                        gab = prova['gabarito_oficial'].split(',')
+                        alu = resp.replace(" ", "").split(',')
+                        acertos = sum([1 for i in range(min(len(gab), len(alu))) if gab[i] == alu[i]])
+                        total = len(gab)
+                        nota = (acertos/total)*100
                         
-                        acertos = 0
-                        total = len(gabarito_oficial)
-                        
-                        # Compara resposta por resposta
-                        for i in range(min(total, len(gabarito_aluno))):
-                            if gabarito_oficial[i] == gabarito_aluno[i]:
-                                acertos += 1
-                        
-                        nota = (acertos / total) * 100
-                        
-                        # Mostra o resultado
                         if nota >= 70:
                             st.balloons()
-                            st.success(f"PARABÉNS! Nota: {nota:.1f}% ({acertos}/{total})")
+                            st.success(f"Aprovado! Nota: {nota:.1f}%")
                         else:
-                            st.warning(f"Nota: {nota:.1f}% ({acertos}/{total}). Estude mais!")
+                            st.error(f"Nota: {nota:.1f}%")
                             
-                        # Salva na planilha
-                        try:
-                            aba_subs = planilha.worksheet("Submissoes")
-                            aba_subs.append_row([
-                                nome_aluno,
-                                prova_atual['curso'],
-                                prova_atual['turma'],
-                                prova_atual['turno'],
-                                prova_atual['nome_prova'],
-                                respostas,
-                                acertos,
-                                total
-                            ])
-                        except:
-                            st.error("Erro ao salvar nota. Verifique a aba 'Submissoes'.")
+                        planilha.worksheet("Submissoes").append_row([
+                            nome, prova['curso'], prova['turma'], prova['turno'], 
+                            prova['nome_prova'], resp, acertos, total
+                        ])
