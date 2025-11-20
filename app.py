@@ -49,7 +49,7 @@ def conectar_banco_dados():
         client = gspread.authorize(creds)
         
         # --- IMPORTANTE: SEU ID VAI AQUI ---
-        ID_PLANILHA = "COLE_AQUI_O_ID_DA_SUA_PLANILHA" 
+        ID_PLANILHA = "10vX_TVmPEcvr-_dpQEyrcVjObGjj4zIWW_7dX7_hBAQ" 
         
         return client.open_by_key(ID_PLANILHA)
         
@@ -200,3 +200,4 @@ else:
                                 nome, prova['curso'], prova['turma'], prova['turno'], 
                                 prova['nome_prova'], resp, acertos, total
                             ])
+
